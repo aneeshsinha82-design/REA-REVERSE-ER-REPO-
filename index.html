@@ -59,7 +59,7 @@ button,input,select{font:inherit}button{border:1px solid var(--line);background:
 <script>
 (() => {
 const $=id=>document.getElementById(id);
-const state={duration:10,fps:30,time:0,playing:false,last:0,bg:"#141b27",layers:[],selected:null,nextId:1};
+const state={duration:10,fps:30,time:0,playing:false,exporting:false,last:0,bg:"#141b27",layers:[],selected:null,nextId:1};
 const stage=$("stage");
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const fmt=t=>{const m=Math.floor(t/60),s=(t%60).toFixed(2).padStart(5,"0");return String(m).padStart(2,"0")+":"+s};
@@ -96,7 +96,7 @@ function renderTimelineHeader(){$("timeReadout").textContent=fmt(state.time);$("
 function renderAll(){renderLayers();renderInspector();renderStage();renderTimeline();renderTimelineHeader();$("saveStatus").textContent="Ready"}
 function addKey(){const l=selected();if(!l){toast("Select a layer first");return}const v={x:l.x,y:l.y,scaleX:l.scaleX,scaleY:l.scaleY,rotation:l.rotation,opacity:l.opacity};const i=l.keys.findIndex(k=>Math.abs(k.t-state.time)<.015);if(i>=0)l.keys[i]={t:Number(state.time.toFixed(2)),v};else l.keys.push({t:Number(state.time.toFixed(2)),v});l.keys.sort((a,b)=>a.t-b.t);renderAll();toast("Keyframe set at "+state.time.toFixed(2)+"s")}
 function seek(t){state.time=clamp(Number(t),0,state.duration);renderStage();renderTimeline();renderTimelineHeader()}
-function loop(ts){if(state.playing){if(state.last)state.time+=(ts-state.last)/1000;if(state.time>=state.duration){state.time=state.duration;state.playing=false;$("playBtn").textContent="▶ Play"}state.last=ts;renderStage();renderTimelineHeader();if(!state.playing)state.last=0}requestAnimationFrame(loop)}
+function loop(ts){if(state.playing&&!state.exporting){if(state.last)state.time+=(ts-state.last)/1000;if(state.time>=state.duration){state.time=state.duration;state.playing=false;$("playBtn").textContent="▶ Play"}state.last=ts;renderStage();renderTimelineHeader();if(!state.playing)state.last=0}requestAnimationFrame(loop)}
 function project(){return {app:"Motion Lab",version:1,width:1280,height:720,duration:state.duration,fps:state.fps,background:state.bg,layers:state.layers}}
 function download(name,data,type){const a=document.createElement("a"),url=URL.createObjectURL(new Blob([data],{type}));a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c]))}
@@ -105,7 +105,7 @@ async function exportVideo(){
  const canvas=document.createElement("canvas");canvas.width=1280;canvas.height=720;const ctx=canvas.getContext("2d");const stream=canvas.captureStream(state.fps||30);
  let recorder;try{const mime=MediaRecorder.isTypeSupported("video/webm;codecs=vp9")?"video/webm;codecs=vp9":"video/webm";recorder=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8000000})}catch(e){toast("Could not start video export");return}
  const chunks=[];recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};recorder.onerror=()=>toast("Video export failed");
- const oldTime=state.time,oldPlaying=state.playing;state.playing=false;
+ const oldTime=state.time,oldPlaying=state.playing;state.exporting=true;state.playing=true;state.last=0;
  const drawFrame=()=>{ctx.fillStyle=state.bg;ctx.fillRect(0,0,1280,720);
   for(const l of state.layers){const v=keyValues(l,state.time);ctx.save();ctx.globalAlpha=v.opacity??1;ctx.globalCompositeOperation=({normal:"source-over",add:"lighter",screen:"screen",multiply:"multiply",overlay:"overlay",darken:"darken",lighten:"lighten",difference:"difference",exclusion:"exclusion"}[l.blendMode]||"source-over");ctx.filter="blur("+((l.blur||0))+"px) brightness("+((l.brightness??100))+"%) contrast("+((l.contrast??100))+"%) saturate("+((l.saturation??100))+"%) hue-rotate("+((l.hue||0))+"deg)";ctx.translate(v.x,v.y);ctx.rotate(v.rotation*Math.PI/180);ctx.scale(v.scaleX,v.scaleY);
    if(l.type==="text"){ctx.fillStyle=l.color;ctx.textAlign="center";ctx.textBaseline="middle";ctx.font=(l.bold?"800 ":"400 ")+(l.fontSize||72)+"px "+(l.fontFamily||"Arial");if(l.shadow){ctx.shadowColor=l.shadowColor||"#000";ctx.shadowBlur=18;ctx.shadowOffsetY=6}const words=String(l.text||"").split("\\n");words.forEach((line,i)=>ctx.fillText(line,0,(i-(words.length-1)/2)*(l.fontSize||72)*1.1))}
@@ -114,8 +114,8 @@ async function exportVideo(){
    ctx.restore()}
  };
  toast("Recording composition in real time…");$("videoBtn").disabled=true;
- recorder.onstop=()=>{const blob=new Blob(chunks,{type:"video/webm"});download("motion-lab-composition.webm",blob,"video/webm");stream.getTracks().forEach(t=>t.stop());state.time=oldTime;state.playing=oldPlaying;state.last=0;renderStage();renderTimelineHeader();$("videoBtn").disabled=false;toast("Video export complete")};
- const start=performance.now();recorder.start(250);
+ recorder.onstop=()=>{const blob=new Blob(chunks,{type:"video/webm"});download("motion-lab-composition.webm",blob,"video/webm");stream.getTracks().forEach(t=>t.stop());state.time=oldTime;state.playing=oldPlaying;state.exporting=false;state.last=0;renderStage();renderTimelineHeader();$("videoBtn").disabled=false;toast("Video export complete")};
+ const start=performance.now();recorder.start(250);renderStage();stage.querySelectorAll("video").forEach(v=>v.play().catch(()=>{}));
  const tick=now=>{state.time=Math.min(state.duration,(now-start)/1000);renderStage();drawFrame();if(state.time>=state.duration){recorder.stop();return}requestAnimationFrame(tick)};requestAnimationFrame(tick);
 }
 function exportSVG(){const parts=['<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">','<rect width="1280" height="720" fill="'+state.bg+'"/>'];for(const l of state.layers){const v=keyValues(l,state.time),x=v.x,y=v.y,rot=v.rotation,common=' transform="translate('+x+' '+y+') rotate('+rot+') scale('+v.scaleX+' '+v.scaleY+')" opacity="'+v.opacity+'"';if(l.type==="text"){parts.push('<text x="0" y="0" fill="'+l.color+'" font-family="'+esc(l.fontFamily)+'" font-size="'+l.fontSize+'" font-weight="'+(l.bold?"700":"400")+'" text-anchor="middle" dominant-baseline="middle"'+common+'>'+esc(l.text)+'</text>')}else if(l.type==="rect"){parts.push('<rect x="'+(-l.width/2)+'" y="'+(-l.height/2)+'" width="'+l.width+'" height="'+l.height+'" rx="4" fill="'+l.color+'"'+common+'/>')}else if(l.type==="circle"){parts.push('<ellipse cx="0" cy="0" rx="'+l.width/2+'" ry="'+l.height/2+'" fill="'+l.color+'"'+common+'/>')}else{let pts=[];for(let i=0;i<10;i++){let a=-Math.PI/2+i*Math.PI/5,r=i%2?l.width*.21:l.width*.46;pts.push((Math.cos(a)*r)+","+((Math.sin(a)*r)*(l.height/l.width)))}parts.push('<polygon points="'+pts.join(" ")+'" fill="'+l.color+'"'+common+'/>')}}parts.push('</svg>');download("motion-lab-frame.svg",parts.join("\n"),"image/svg+xml");toast("SVG frame exported")}
